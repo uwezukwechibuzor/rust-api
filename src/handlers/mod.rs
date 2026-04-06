@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::{
@@ -45,17 +45,16 @@ pub async fn create_user(
         return Err(AppError::BadRequest("Age must be between 0 and 150".into()));
     }
 
-    let user = sqlx::query_as!(
-        User,
+    let user = sqlx::query_as::<sqlx::Postgres, User>(
         r#"
         INSERT INTO users (name, email, age)
         VALUES ($1, $2, $3)
         RETURNING id, name, email, age, created_at, updated_at
         "#,
-        body.name.trim(),
-        body.email.trim().to_lowercase(),
-        body.age,
     )
+    .bind(body.name.trim())
+    .bind(body.email.trim().to_lowercase())
+    .bind(body.age)
     .fetch_one(&state.db)
     .await?;
 
@@ -69,22 +68,21 @@ pub async fn list_users(
     let limit = params.limit.clamp(1, 100);
     let offset = (params.page.max(1) - 1) * limit;
 
-    let total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM users")
+    let row = sqlx::query("SELECT COUNT(*) FROM users")
         .fetch_one(&state.db)
-        .await?
-        .unwrap_or(0);
+        .await?;
+    let total: i64 = row.get(0);
 
-    let users = sqlx::query_as!(
-        User,
+    let users = sqlx::query_as::<sqlx::Postgres, User>(
         r#"
         SELECT id, name, email, age, created_at, updated_at
         FROM users
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2
         "#,
-        limit,
-        offset,
     )
+    .bind(limit)
+    .bind(offset)
     .fetch_all(&state.db)
     .await?;
 
@@ -95,14 +93,13 @@ pub async fn get_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<User>, AppError> {
-    let user = sqlx::query_as!(
-        User,
+    let user = sqlx::query_as::<sqlx::Postgres, User>(
         r#"
         SELECT id, name, email, age, created_at, updated_at
         FROM users WHERE id = $1
         "#,
-        id,
     )
+    .bind(id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("User {} not found", id)))?;
@@ -115,11 +112,10 @@ pub async fn update_user(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateUserRequest>,
 ) -> Result<Json<User>, AppError> {
-    let existing = sqlx::query_as!(
-        User,
+    let existing = sqlx::query_as::<sqlx::Postgres, User>(
         "SELECT id, name, email, age, created_at, updated_at FROM users WHERE id = $1",
-        id,
     )
+    .bind(id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("User {} not found", id)))?;
@@ -135,19 +131,18 @@ pub async fn update_user(
         return Err(AppError::BadRequest("Invalid email address".into()));
     }
 
-    let user = sqlx::query_as!(
-        User,
+    let user = sqlx::query_as::<sqlx::Postgres, User>(
         r#"
         UPDATE users
         SET name = $1, email = $2, age = $3
         WHERE id = $4
         RETURNING id, name, email, age, created_at, updated_at
         "#,
-        new_name.trim(),
-        new_email.trim().to_lowercase(),
-        new_age,
-        id,
     )
+    .bind(new_name.trim())
+    .bind(new_email.trim().to_lowercase())
+    .bind(new_age)
+    .bind(id)
     .fetch_one(&state.db)
     .await?;
 
@@ -158,7 +153,8 @@ pub async fn delete_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
-    let result = sqlx::query!("DELETE FROM users WHERE id = $1", id)
+    let result = sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(id)
         .execute(&state.db)
         .await?;
 

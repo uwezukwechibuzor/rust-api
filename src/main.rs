@@ -4,7 +4,7 @@ mod handlers;
 mod models;
 
 use axum::{
-    routing::{delete, get, post, put},
+    routing::get,
     Router,
 };
 use handlers::{
